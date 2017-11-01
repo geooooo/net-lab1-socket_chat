@@ -18,17 +18,17 @@ abstract class ChatProtocol {
 
     // Сообщение от клиента или сервера
     protected static function message(string $data) : string {
-        return "MESSAGE{self::DATA_SEP}$data{self::DATA_END}";
+        return "MESSAGE" . self::DATA_SEP . $data . self::DATA_END;
     }
 
     // Сообщение о выходе клиента или завершении работы сервера
     protected static function quit() : string {
-        return "QUIT{self::DATA_END}";
+        return "QUIT" . self::DATA_END;
     }
 
     // Парсинг сообщения
     protected static function parse(string $message) : array {
-        list($message_name, $message_data) = explode(self::DATA_SEP, $message);
+        list($message_name, $message_data) = explode(self::DATA_SEP, $message, 2);
         $message_data[strlen($message_data)-1] = "";
         return [$message_name, $message_data];
     }
