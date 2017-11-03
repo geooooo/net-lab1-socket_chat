@@ -11,9 +11,11 @@ namespace Chat;
 abstract class ChatProtocol {
 
     // Признак окончания данных в сообщении
-    const DATA_END = "\0";
+    const DATA_END = "|";
     // Разделитель между заголовком сообщения и данными
-    const DATA_SEP = " ";
+    const DATA_SEP = "_";
+    // Максимальный размер передаваемых сообщений по протоколу
+    const MESSAGE_MAX_LENGTH = 100;
 
 
     // Сообщение от клиента или сервера
