@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Chat;
 
-require_once __DIR__."chatprotocol.php";
+require_once __DIR__."/chatprotocol.php";
 
 
 // Серверная часть сетевого чата
@@ -33,27 +33,31 @@ class ChatServer extends ChatProtocol {
 
 
     // Создание сервера сетевого чата
-    public function create(string $host="localhost", int $port=8080) {
-        if (is_null($this->$instance)) {
+    public static function create(string $host="localhost", int $port=8080) {
+        if (is_null(self::$instance)) {
             self::$instance = new self($host, $port);
         }
-        return self::$instance;
     }
 
     // Создание сервера
     private function __construct(string $host, int $port) {
-        $this->$host = $host;
-        $this->$port = $port;
+        $this->host = $host;
+        $this->port = $port;
         // Создание серверного сокета
-        $this->$server_socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-        if ($this->$server_socket === false) {
+        $this->server_socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        if ($this->server_socket === false) {
             $this->abort("Не удалось создать серверный сокет !");
         }
         // Привязка серверного сокета к хосту и порту
-        if (socket_bind($this->$server_socket, $this->$host, $this->$port) === false) {
+        if (socket_bind($this->server_socket, $this->host, $this->port) === false) {
                 $this->abort("Не удалось привязать имя хоста и порт к серверному сокету !");
         }
         $this->write_log("Сервер запущен ...");
+        // Обработка сигнала SIGINT и нажатия ctrl+C
+        pcntl_signal(SIGINT, function($signo) {
+            $this->close();
+            exit(0);
+        });
         // Ожидание подключения клиентов
         $this->waiting();
     }
@@ -61,7 +65,7 @@ class ChatServer extends ChatProtocol {
     // Закрытие сервера
     private function close() {
         $this->write_log("Закрытие соединений ...");
-        foreach ($this->$clients as $client) {
+        foreach ($this->clients as $client) {
             socket_close($client["socket"]);
         }
         $this->write_log("Завершение работы сервера ...");
@@ -69,13 +73,18 @@ class ChatServer extends ChatProtocol {
 
     // Ожидание подключений клиентов
     private function waiting() {
-        if (socket_listen($this->$server_socket, self::CLIENT_MAX_COUNT) === false) {
+        if (socket_listen($this->server_socket, self::CLIENT_MAX_COUNT) === false) {
             $this->abort("Не удалось начать прослушивание входящих соединений !");
         }
+        socket_set_nonblock($this->server_socket);
         $this->write_log("Сервер готов к установке соединений ...");
-        $client_socket = socket_accept($this->server_socket);
-        ++$this->$client_count;
-        $this->listen($client_socket);
+        while (true) {
+            while (!($client_socket = socket_accept($this->server_socket))) {
+                pcntl_signal_dispatch();
+            }
+            ++$this->client_count;
+            $this->listen($client_socket);
+        }
     }
 
     // Прослушивание и отправка сообщений клиенту
@@ -83,6 +92,10 @@ class ChatServer extends ChatProtocol {
         $client_login = "";
         while (true) {
             $client_message = $this->read($client_socket);
+            if (empty($client_message)) {
+                pcntl_signal_dispatch();
+                continue;
+            }
             $client_login = $this->process_message($client_socket, $client_message, $client_login);
         }
     }
@@ -94,7 +107,7 @@ class ChatServer extends ChatProtocol {
 
     // Отправка сообщения всем клиентам
     private function write_all(string $message) {
-        foreach ($this->$clients as $client) {
+        foreach ($this->clients as $client) {
             $this->write($client["socket"], $message);
         }
     }
@@ -110,9 +123,8 @@ class ChatServer extends ChatProtocol {
     }
 
     // Добавление информации о клиенте
-    private function append_client(resource $client_socket,
-                                   string   $client_login) {
-        $this->$clients[] = [
+    private function append_client(resource $client_socket, string $client_login) {
+        $this->clients[] = [
             "login"  => $client_login,
             "socket" => $client_socket
         ];
@@ -120,10 +132,10 @@ class ChatServer extends ChatProtocol {
 
     // Удаление информации о клиенте
     private function remove_client(string $client_login) {
-        $this->$clients = array_filter($this->$clients, function ($client) {
+        $this->clients = array_filter($this->clients, function ($client) {
             if ($client["login"] === $client_login) {
                 socket_close($client["socket"]);
-                --$this->$client_count;
+                --$this->client_count;
                 return false;
             }
             return true;
@@ -132,15 +144,15 @@ class ChatServer extends ChatProtocol {
 
     // Обработка сообщения от клиента и получение его логина
     private function proccess_message(resource $client_socket,
-                                      string   $client_message,
-                                      string   $client_login) : string {
+                                     string   $client_message,
+                                     string   $client_login) : string {
         list($message_name, $message_data) = self::parse($client_message);
         switch ($message_name) {
-            case "LOGIN":   $client_login = proccess_message_login($client_socket, $message_data);
+            case "LOGIN":   $client_login = $this->proccess_message_login($client_socket, $message_data);
                             break;
-            case "MESSAGE": proccess_message_message($client_socket, $client_login, $message_data);
+            case "MESSAGE": $this->proccess_message_message($client_socket, $client_login, $message_data);
                             break;
-            case "QUIT":    proccess_message_quit($client_socket, $client_login);
+            case "QUIT":    $this->proccess_message_quit($client_socket, $client_login);
                             break;
             default:        $this->abort("Неизвестное сообщение от клиента: '$client_message' !");
         }
@@ -149,7 +161,7 @@ class ChatServer extends ChatProtocol {
 
     // Обработка входящего от клиента сообщения авторизации
     private function proccess_message_login(resource $client_socket,
-                                            string   $login) : string {
+                                           string   $login) : string {
         $login_pattern = '/^[\w_]+$/';
         $message = "";
         $result_login = "";
@@ -173,15 +185,15 @@ class ChatServer extends ChatProtocol {
 
     // Обработка входящего от клиента сообщения с текстом
     private function proccess_message_message(resource $client_socket,
-                                              string   $client_login,
-                                              string   $text) {
+                                             string   $client_login,
+                                             string   $text) {
         $this->write_all(self::message($text));
         $this->write_log("$client_login: $text");
     }
 
     // Обработка входящего от клиента сообщения о завершении работы
     private function proccess_message_quit(resource $client_socket,
-                                           string   $client_login) {
+                                          string   $client_login) {
         $this->write($client_socket, self::quit());
         $this->remove_client($client_login);
         $this->write_log("- $client_login отсоединился");
@@ -189,7 +201,7 @@ class ChatServer extends ChatProtocol {
 
     // Проверка существования клиента с заданым логином
     private function is_login_exists(string $login) : boolean {
-        foreach ($this->$clients as $client) {
+        foreach ($this->clients as $client) {
             if ($client["login"] === $login) {
                 return true;
             }
