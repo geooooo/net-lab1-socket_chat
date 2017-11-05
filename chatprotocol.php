@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Chat;
 
 
+
 // Протокол передачи сообщений чата
 // Клиент и сервер общаются посредством передачи сообщений друг другу:
 // MESSAGE_NAME [MESSAGE_SEPARATOR MESSAGE_DATA] MESSAGE_END
@@ -36,6 +37,6 @@ abstract class ChatProtocol {
     }
 
     // Передача информации об авторизации пользователя
-    abstract static function login(string $data) : string;
+    abstract protected static function login(string $data) : string;
 
 }
