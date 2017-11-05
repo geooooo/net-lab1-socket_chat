@@ -7,6 +7,7 @@ namespace Chat;
 require_once __DIR__."/chatprotocol.php";
 
 
+
 // Клиентская часть сетевого чата
 class ChatClient extends ChatProtocol {
 
@@ -16,10 +17,10 @@ class ChatClient extends ChatProtocol {
     private $port = 0;
     // Логин клиента
     private $login = "";
-    // Сокет сервера
-    private $server_socket = null;
     // Сокет клиента
     private $client_socket = null;
+    // Был ли клиент авторизован
+    private $is_authorized = false;
 
 
     // Создание клиента сетевого чата
@@ -29,53 +30,90 @@ class ChatClient extends ChatProtocol {
         // Создание клиентского сокета
         $this->client_socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         // Соединение с сервером
-        $this->server_socket = socket_connect($this->client_socket, $this->host, $this->port);
-        if ($this->server_socket === false) {
+        if (socket_connect($this->client_socket, $this->host, $this->port) === false) {
             $this->abort("Не удалось соединиться с сервером !");
         }
+        socket_set_nonblock($this->client_socket);
+    }
+
+    // Закрытие клиента
+    public function __destruct() {
+        $this->close();
     }
 
     // Закрытие клиента
     public function close() {
         $this->write(self::quit());
-        socket_close($this->server_socket);
         socket_close($this->client_socket);
     }
 
     // Авторизация клиента на сервере
     public function authorization(string $login) : string {
+        if ($this->is_authorized) {
+            $this->abort("Попытка повторной авторизации !");
+        }
         $this->write(self::login($login));
-        $message = $this->read();
+        while (!($server_message = $this->read())) ;
         list($_, $message_data) = self::parse($server_message);
+        if ($message_data === "OK") {
+            $this->is_authorized = true;
+        }
         return $message_data;
     }
 
     // Отправка сообщения с текстом на сервер
     public function write_text(string $text) {
+        // Не отправлять пустые сообщения
+        if (empty($text)) {
+            return;
+        }
         $this->write(self::message($text));
+    }
+
+    // Получение сообщения с текстом от сервера
+    public function read_text() {
+        $server_message = $this->read();
+        // Если пришло пустое сообщение
+        if (empty($server_message)) {
+            return "";
+        }
+        list($message_name, $message_data) = self::parse($server_message);
+        // Если пришло сообщение о завершении сервера
+        if ($message_name === "QUIT") {
+            return null;
+        }
+        return $message_data;
     }
 
     // Отправка сообщения серверу
     private function write(string $message) {
-        socket_write($this->server_socket, $message, self::MESSAGE_MAX_LENGTH);
+        @socket_write($this->client_socket, $message, self::MESSAGE_MAX_LENGTH);
+        $sle = socket_last_error($this->client_socket);
+        // Если сервер разорвал соединение
+        if ($sle !== 0 and $sle !== 11) {
+            $this->abort("Сервер недоступен ! " . "(". socket_strerror($sle) .")");
+        }
     }
 
     // Получение сообщения от сервера
-    private function read() : string {
-        return socket_read($this->server_socket, self::MESSAGE_MAX_LENGTH);
+    private function read() {
+        $message = @socket_read($this->client_socket, self::MESSAGE_MAX_LENGTH);
+        $sle = socket_last_error($this->client_socket);
+        // Если сервер разорвал соединение
+        if ($sle !== 0 and $sle !== 11) {
+            $this->abort("Сервер недоступен ! " . "(". socket_strerror($sle) .")");
+        }
+        return $message;
     }
 
     // Аварийное завершение клиента
     private function abort(string $text) {
-        if (!is_null($this->server_socket)) {
-            socket_close($this->server_socket);
-        }
         socket_close($this->client_socket);
-        throw new Exception($text);
+        throw new \Exception($text);
     }
 
     // Сообщение с логином клиента для авторизации на сервере
-    private static function login(string $login) : string {
+    protected static function login(string $login) : string {
         return "LOGIN" . self::DATA_SEP . $login . self::DATA_END;
     }
 
