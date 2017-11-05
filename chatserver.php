@@ -67,6 +67,7 @@ class ChatServer extends ChatProtocol {
     private function close() {
         $this->write_log("Закрытие соединений ...");
         foreach ($this->clients as $client) {
+            @socket_write($client["socket"], self::quit());
             socket_close($client["socket"]);
         }
         $this->write_log("Завершение работы сервера ...");
@@ -79,13 +80,28 @@ class ChatServer extends ChatProtocol {
         }
         socket_set_nonblock($this->server_socket);
         $this->write_log("Сервер готов к установке соединений ...");
+        $is_client_max_count = false;
         while (true) {
-            while (!($client_socket = socket_accept($this->server_socket))) {
-                pcntl_signal_dispatch();
+            // Обработка сигналов
+            pcntl_signal_dispatch();
+            // Если достигнуто максимальное число клиентов
+            if ($this->client_count === self::CLIENT_MAX_COUNT) {
+                if (!$is_client_max_count) {
+                    $this->write_log("Достигнуто максимальное число клиентов !");
+                }
+                $is_client_max_count = true;
+            } else {
+                $is_client_max_count = false;
+                // Принятие соединений
+                $client_socket = socket_accept($this->server_socket);
+                if ($client_socket === false) {
+                    continue;
+                }
+                // Прослушивание клиента
+                $this->write_log("? Соединение с новым клиентом");
+                ++$this->client_count;
+                $this->listen($client_socket);
             }
-            $this->write_log("? Соединение с новым клиентом");
-            ++$this->client_count;
-            $this->listen($client_socket);
         }
     }
 
@@ -98,22 +114,26 @@ class ChatServer extends ChatProtocol {
             // Если не поступало сообщений от клиента, обработка сигналов
             if (empty($client_message)) {
                 pcntl_signal_dispatch();
-                continue;
+            } else {
+                $client_login = $this->proccess_message($client_socket, $client_message, $client_login);
             }
-            $client_login = $this->proccess_message($client_socket, $client_message, $client_login);
         }
     }
 
     // Отправка сообщения клиенту
     private function write($client_socket, string $message) {
         $r = @socket_write($client_socket, $message, self::MESSAGE_MAX_LENGTH);
-        $sle = socket_last_error($client_socket);
         // Если клиент разорвал соединение
+        $sle = socket_last_error($client_socket);
         if ($sle !== 0 and $sle !== 11) {
-            var_dump($sle); // TODO: удалить клиента
+
+            // TODO: удалить клиента
+            var_dump($sle);
             var_dump(socket_strerror($sle));
             $this->close();
             die;
+            // удалить клиента
+
         }
     }
 
@@ -131,14 +151,33 @@ class ChatServer extends ChatProtocol {
 
     // Получение сообщения от клиента
     private function read($client_socket) {
-        $message = @socket_read($client_socket, self::MESSAGE_MAX_LENGTH);
-        $sle = socket_last_error($client_socket);
-        // Если клиент разорвал соединение
-        if ($sle !== 0 and $sle !== 11) {
-            var_dump($sle); // TODO: удалить клиента
-            var_dump(socket_strerror($sle));
-            $this->close();
-            die;
+        // Буфер сообщений
+        static $message_buf = "";
+        // Если буфер сообщений пуст, считать следующую порцию
+        if (empty($message_buf)) {
+            $message_buf = @socket_read($client_socket, self::MESSAGE_MAX_LENGTH);
+            // Если клиент разорвал соединение
+            $sle = socket_last_error($client_socket);
+            if ($sle !== 0 and $sle !== 11) {
+
+                // TODO: удалить клиента
+                var_dump($sle);
+                var_dump(socket_strerror($sle));
+                $this->close();
+                die;
+                // удалить клиента
+
+            }
+        }
+        // Если от клиента поступили данные
+        $message = "";
+        if (!empty($message_buf)) {
+            $messages = array_slice(explode(self::DATA_END, $message_buf), 0, -1);
+            $messages = array_map(function ($message) {
+                return $message . self::DATA_END;
+            }, $messages);
+            $message_buf = implode("", array_slice($messages, 1));
+            $message = $messages[0];
         }
         return $message;
     }
@@ -186,7 +225,8 @@ class ChatServer extends ChatProtocol {
         $message = "";
         $result_login = "";
         if (preg_match($login_pattern, $login)) {
-            if ($this->is_login_exists($login)) {
+            if ($this->is_login_exists($login)) {    $client_login = $this->proccess_message($client_socket, $client_message, $client_login);
+
                 $message = self::login("EXISTS");
                 $this->write_log("? Новый клиент попытался соединиться с уже занятым логином");
             } else {
@@ -207,7 +247,7 @@ class ChatServer extends ChatProtocol {
     private function proccess_message_message($client_socket,
                                               string $client_login,
                                               string $text) {
-        $this->write_all(self::message($text));
+        $this->write_all(self::message("$client_login: $text"));
         $this->write_log("$client_login: $text");
     }
 
@@ -216,8 +256,12 @@ class ChatServer extends ChatProtocol {
         $this->write($client_socket, self::quit());
         $this->remove_client($client_login);
         $this->write_log("- $client_login отсоединился");
-        $this->close(); // TODO: thread вместо костыля
+
+        // TODO: thread вместо костыля
+        $this->close();
         die;
+        // thread вместо костыля
+
     }
 
     // Проверка существования клиента с заданым логином

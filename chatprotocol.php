@@ -31,8 +31,13 @@ abstract class ChatProtocol {
 
     // Парсинг сообщения
     protected static function parse(string $message) : array {
-        list($message_name, $message_data) = explode(self::DATA_SEP, $message, 2);
-        $message_data[strlen($message_data)-1] = "";
+        if (strpos($message, self::DATA_SEP)) {
+            list($message_name, $message_data) = explode(self::DATA_SEP, $message, 2);
+            $message_data = substr($message_data, 0, -1);
+        } else {
+            $message_name = substr($message, 0, -1);;
+            $message_data = "";
+        }
         return [$message_name, $message_data];
     }
 

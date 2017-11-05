@@ -21,6 +21,8 @@ class ChatClient extends ChatProtocol {
     private $client_socket = null;
     // Был ли клиент авторизован
     private $is_authorized = false;
+    // Буфер входящих сообщений от сервера
+    private $message_bug = "";
 
 
     // Создание клиента сетевого чата
@@ -38,13 +40,18 @@ class ChatClient extends ChatProtocol {
 
     // Закрытие клиента
     public function __destruct() {
-        $this->close();
+        if (!is_null($this->client_socket)) {
+            $this->close();
+        }
     }
 
     // Закрытие клиента
     public function close() {
-        $this->write(self::quit());
-        socket_close($this->client_socket);
+        if (!is_null($this->client_socket)) {
+            $this->write(self::quit());
+            socket_close($this->client_socket);
+            $this->client_socket = null;
+        }
     }
 
     // Авторизация клиента на сервере
@@ -54,7 +61,10 @@ class ChatClient extends ChatProtocol {
         }
         $this->write(self::login($login));
         while (!($server_message = $this->read())) ;
-        list($_, $message_data) = self::parse($server_message);
+        list($message_name, $message_data) = self::parse($server_message);
+        if ($message_name === "QUIT") {
+            return null;
+        }
         if ($message_data === "OK") {
             $this->is_authorized = true;
         }
@@ -73,10 +83,6 @@ class ChatClient extends ChatProtocol {
     // Получение сообщения с текстом от сервера
     public function read_text() {
         $server_message = $this->read();
-        // Если пришло пустое сообщение
-        if (empty($server_message)) {
-            return "";
-        }
         list($message_name, $message_data) = self::parse($server_message);
         // Если пришло сообщение о завершении сервера
         if ($message_name === "QUIT") {
@@ -88,8 +94,8 @@ class ChatClient extends ChatProtocol {
     // Отправка сообщения серверу
     private function write(string $message) {
         @socket_write($this->client_socket, $message, self::MESSAGE_MAX_LENGTH);
-        $sle = socket_last_error($this->client_socket);
         // Если сервер разорвал соединение
+        $sle = socket_last_error($this->client_socket);
         if ($sle !== 0 and $sle !== 11) {
             $this->abort("Сервер недоступен ! " . "(". socket_strerror($sle) .")");
         }
@@ -97,11 +103,23 @@ class ChatClient extends ChatProtocol {
 
     // Получение сообщения от сервера
     private function read() {
-        $message = @socket_read($this->client_socket, self::MESSAGE_MAX_LENGTH);
-        $sle = socket_last_error($this->client_socket);
-        // Если сервер разорвал соединение
-        if ($sle !== 0 and $sle !== 11) {
-            $this->abort("Сервер недоступен ! " . "(". socket_strerror($sle) .")");
+        if (empty($this->message_buf)) {
+            $this->message_buf = @socket_read($this->client_socket, self::MESSAGE_MAX_LENGTH);
+            // Если сервер разорвал соединение
+            $sle = socket_last_error($this->client_socket);
+            if ($sle !== 0 and $sle !== 11) {
+                $this->abort("Сервер недоступен ! " . "(". socket_strerror($sle) .")");
+            }
+        }
+        // Извлечение первого сообщения
+        $message = "";
+        if (!empty($this->message_buf)) {
+            $messages = array_slice(explode(self::DATA_END, $this->message_buf), 0, -1);
+            $messages = array_map(function ($message) {
+                return $message . self::DATA_END;
+            }, $messages);
+            $this->message_buf = implode("", array_slice($messages, 1));
+            $message = $messages[0];
         }
         return $message;
     }
