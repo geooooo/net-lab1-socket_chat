@@ -22,7 +22,7 @@ class ChatClient extends ChatProtocol {
     // Был ли клиент авторизован
     private $is_authorized = false;
     // Буфер входящих сообщений от сервера
-    private $message_bug = "";
+    private $message_buf = "";
 
 
     // Создание клиента сетевого чата
@@ -73,6 +73,7 @@ class ChatClient extends ChatProtocol {
 
     // Отправка сообщения с текстом на сервер
     public function write_text(string $text) {
+        if (!$this->is_authorized) return;
         // Не отправлять пустые сообщения
         if (empty($text)) {
             return;
@@ -82,6 +83,7 @@ class ChatClient extends ChatProtocol {
 
     // Получение сообщения с текстом от сервера
     public function read_text() {
+        if (!$this->is_authorized) return null;
         $server_message = $this->read();
         list($message_name, $message_data) = self::parse($server_message);
         // Если пришло сообщение о завершении сервера
