@@ -63,7 +63,7 @@ class ChatClient extends ChatProtocol {
         while (!($server_message = $this->read())) ;
         list($message_name, $message_data) = self::parse($server_message);
         if ($message_name === "QUIT") {
-            return null;
+            return false;
         }
         if ($message_data === "OK") {
             $this->is_authorized = true;
@@ -88,7 +88,7 @@ class ChatClient extends ChatProtocol {
         list($message_name, $message_data) = self::parse($server_message);
         // Если пришло сообщение о завершении сервера
         if ($message_name === "QUIT") {
-            return null;
+            return false;
         }
         return $message_data;
     }

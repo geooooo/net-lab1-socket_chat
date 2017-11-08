@@ -14,7 +14,7 @@ class ChatServer extends ChatProtocol {
     // Максимальное число подключающихся клиетов
     const CLIENT_MAX_COUNT = 100;
     // Размер разделяемой памяти в байтах
-    const SHM_SIZE = 50;
+    const SHM_SIZE = 100;
 
 
     // Singleton-экземпляр текущего класса
