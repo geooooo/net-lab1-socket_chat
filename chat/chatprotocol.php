@@ -19,6 +19,11 @@ abstract class ChatProtocol {
     const MESSAGE_MAX_LENGTH = 100;
 
 
+    // Шифрование пароля
+    protected static function crypt(string $password) {
+        return ($password) . "bla-bla";
+    }
+
     // Сообщение от клиента или сервера
     protected static function message(string $data) : string {
         return "MESSAGE" . self::DATA_SEP . $data . self::DATA_END;
@@ -42,8 +47,5 @@ abstract class ChatProtocol {
         }
         return [$message_name, $message_data];
     }
-
-    // Передача информации об авторизации пользователя
-    abstract protected static function login(string $data) : string;
 
 }

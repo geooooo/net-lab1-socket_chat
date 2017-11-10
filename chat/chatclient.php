@@ -54,12 +54,31 @@ class ChatClient extends ChatProtocol {
         }
     }
 
+    // Регистрация клиента на сервере
+    public function registration(string $login, string $pwd) {
+        $pwd_pattern = '/^\S{6,}$/';
+        $result = "";
+        if (!preg_match($pwd_pattern, $pwd)) {
+            $result = "BAD_PWD";
+        } else {
+            // Регистрация
+            $this->write(self::registr($login, self::crypt($pwd)));
+            while (!($server_message = $this->read())) ;
+            list($message_name, $message_data) = self::parse($server_message);
+            if ($message_name === "QUIT") {
+                return false;
+            }
+            $result = $message_data;
+        }
+        return $result;
+    }
+
     // Авторизация клиента на сервере
-    public function authorization(string $login) : string {
+    public function authorization(string $login, string $pwd) : string {
         if ($this->is_authorized) {
             $this->abort("Попытка повторной авторизации !");
         }
-        $this->write(self::login($login));
+        $this->write(self::login($login, self::crypt($pwd)));
         while (!($server_message = $this->read())) ;
         list($message_name, $message_data) = self::parse($server_message);
         if ($message_name === "QUIT") {
@@ -133,8 +152,13 @@ class ChatClient extends ChatProtocol {
     }
 
     // Сообщение с логином клиента для авторизации на сервере
-    protected static function login(string $login) : string {
-        return "LOGIN" . self::DATA_SEP . $login . self::DATA_END;
+    protected static function login(string $login, string $pwd) : string {
+        return "LOGIN" . self::DATA_SEP . $login . self::DATA_SEP . $pwd . self::DATA_END;
+    }
+
+    // Сообщение с логином клиента для авторизации на сервере
+    protected static function registr(string $login, string $pwd) : string {
+        return "REGISTR" . self::DATA_SEP . $login . self::DATA_SEP . $pwd . self::DATA_END;
     }
 
 }

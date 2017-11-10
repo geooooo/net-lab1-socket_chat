@@ -15,7 +15,8 @@ class ChatServer extends ChatProtocol {
     const CLIENT_MAX_COUNT = 100;
     // Размер разделяемой памяти в байтах
     const SHM_SIZE = 100;
-
+    // Имя БД
+    const DB_NAME = "chat.db";
 
     // Singleton-экземпляр текущего класса
     private static $instance = null;
@@ -36,6 +37,8 @@ class ChatServer extends ChatProtocol {
     private $client_count = 0;
     // Ключ для доступа к разделяемой памяти
     private $shm_key = null;
+    // Дескриптор БД
+    private $db = null;
 
 
     // Создание singleton-сервера сетевого чата
@@ -73,6 +76,18 @@ class ChatServer extends ChatProtocol {
         $this->shm_key = ftok(__FILE__, 't');
         $shmid = shmop_open($this->shm_key, "c", 0666, self::SHM_SIZE);
         shmop_close($shmid);
+        // Соединение с СУБД
+        $this->db = new \SQLite3(self::DB_NAME);
+        // Создание БД, если её нет
+        if (filesize(self::DB_NAME) === 0) {
+            $sql = "
+                CREATE TABLE clients (
+                    login    STRING,
+                    password STRING
+                )
+            ";
+            $this->db->query($sql);
+        }
         // Ожидание подключения клиентов
         $this->waiting();
     }
@@ -88,6 +103,8 @@ class ChatServer extends ChatProtocol {
         $shmid = shmop_open($this->shm_key, "c", 0666, self::SHM_SIZE);
         shmop_delete($shmid);
         shmop_close($shmid);
+        // Закрытие соединения с СУБД
+        $this->db->close();
         $this->write_log("Завершение работы сервера ...");
     }
 
@@ -194,7 +211,9 @@ class ChatServer extends ChatProtocol {
             }
             return true;
         });
-        $this->write_all(self::message("- $login отсоединился"));
+        if (!empty($login)) {
+            $this->write_all(self::message("- $login отсоединился"));
+        }
     }
 
     // Добавление логина клиента по его сокету
@@ -279,35 +298,34 @@ class ChatServer extends ChatProtocol {
                             break;
             case "QUIT":    $this->proccess_message_quit($client_socket);
                             break;
+            case "REGISTR": $this->proccess_message_registr($client_socket, $message_data);
+                            break;
             default:        $this->abort("Неизвестное сообщение от клиента: '$client_message' !");
         }
         return $client_login;
     }
 
     // Обработка входящего от клиента сообщения авторизации
-    private function proccess_message_login($client_socket, string $login) : string {
-        $login_pattern = '/^[\w_]+$/';
-        $message = "";
+    private function proccess_message_login($client_socket, string $message_data) : string {
         $result_login = "";
-        $ok_login = false;
-        if (preg_match($login_pattern, $login)) {
-            if ($this->is_login_exists($login)) {
-                $message = self::login("EXISTS");
-                $this->write_log("? Новый клиент попытался соединиться с уже занятым логином");
-            } else {
-                $ok_login = true;
-                $message = self::login("OK");
-                $this->append_client_login($client_socket, $login);
-                $this->write_log("+ $login соединился");
-                $result_login = $login;
-            }
+        // Выделение логина и пароля
+        list($login, $pwd) = explode(self::DATA_SEP, $message_data, 2);
+        $sql = "SELECT login FROM clients
+                WHERE login = '$login' AND password = '$pwd'";
+        $result = $this->db->query($sql);
+        $result = $result->fetchArray(SQLITE3_ASSOC);
+        if ($this->is_login_exists($login)) {
+            $this->write($client_socket, self::login("ALREADY"));
+            $this->write_log("? попытка повторной авторизации по логину '$login'");
+        } elseif (!empty($result)) {
+            $result_login = $result["login"];
+            $this->write($client_socket, self::login("OK"));
+            $this->append_client_login($client_socket, $result_login);
+            $this->write_all(self::message("+ $login авторизовался"));
+            $this->write_log("+ $login авторизовался");
         } else {
-            $message = self::login("BAD");
-            $this->write_log("? Новый клиент попытался соединиться с неправильным логином");
-        }
-        $this->write($client_socket, $message);
-        if ($ok_login) {
-            $this->write_all(self::message("+ $login соединился"));
+            $this->write($client_socket, self::login("BAD"));
+            $this->write_log("? Новый клиент неудачно авторизовался");
         }
         return $result_login;
     }
@@ -323,6 +341,35 @@ class ChatServer extends ChatProtocol {
     // Обработка входящего от клиента сообщения о завершении работы
     private function proccess_message_quit($client_socket) {
         $this->remove_client($client_socket);
+    }
+
+    // Обработка сообщения регистрации клиента
+    private function proccess_message_registr($client_socket, string $message_data) {
+        // Выделение логина и пароля
+        list($login, $pwd) = explode(self::DATA_SEP, $message_data, 2);
+        // Проверка логина
+        // Проверка коректности логина
+        $login_pattern = '/^[\w_]+$/';
+        if (!preg_match($login_pattern, $login)) {
+            $this->write_log("? Новый клиент попытался регистрироваться с неправильным логином");
+            $this->write($client_socket, self::registr("BAD_LOGIN"));
+            return;
+        }
+        // Проверка существования логина
+        $sql = "SELECT login FROM clients
+                WHERE login = '$login'";
+        $result = $this->db->query($sql);
+        if (empty($result->fetchArray())) {
+            // Регистрация
+            $sql = "INSERT INTO clients (login, password)
+                    VALUES ('$login', '$pwd')";
+            $this->db->query($sql);
+            $this->write_log("* Новый клиент зарегистрирован");
+            $this->write($client_socket, self::registr("OK"));
+        } else {
+            $this->write_log("? Новый клиент попытался регистрироваться с занятым логином");
+            $this->write($client_socket, self::registr("EXISTS_LOGIN"));
+        }
     }
 
     // Проверка существования клиента с заданым логином
@@ -346,4 +393,8 @@ class ChatServer extends ChatProtocol {
         return "LOGIN" . self::DATA_SEP . $data . self::DATA_END;
     }
 
+    // Ответ клиенту на сообщение с регистрацией
+    protected static function registr(string $data) : string {
+        return "REGISTR" . self::DATA_SEP . $data . self::DATA_END;
+    }
 }
