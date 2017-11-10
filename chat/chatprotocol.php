@@ -21,7 +21,7 @@ abstract class ChatProtocol {
 
     // Шифрование пароля
     protected static function crypt(string $password) {
-        return ($password) . "bla-bla";
+        return md5($password);
     }
 
     // Сообщение от клиента или сервера

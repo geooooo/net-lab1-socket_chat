@@ -11,7 +11,7 @@ $client = new Chat\ChatClient();
 print("Зарегистрироваться (y/n) ?\n");
 $answer = strtolower(trim(fgets(STDIN)));
 if ($answer === "y") {
-    print("Регистрация\n");
+    print("### Регистрация ###\n");
     do {
         print("Введите логин: ");
         $login = trim(fgets(STDIN));
@@ -40,7 +40,7 @@ if ($answer === "y") {
 }
 
 // Авторизация
-print("Авторизация\n");
+print("### Авторизация ###\n");
 do {
     print("Введите логин: ");
     $login = trim(fgets(STDIN));
