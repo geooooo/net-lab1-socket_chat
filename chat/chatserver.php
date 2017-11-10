@@ -173,9 +173,11 @@ class ChatServer extends ChatProtocol {
     }
 
     // Отправка сообщения всем клиентам
-    private function write_all(string $message) {
+    private function write_all(string $message, $not_client_socket) {
         foreach ($this->clients as $client) {
-            $this->write($client["socket"], $message);
+            if ($client["socket"] !== $not_client_socket) {
+                $this->write($client["socket"], $message);
+            }
         }
     }
 
@@ -212,7 +214,7 @@ class ChatServer extends ChatProtocol {
             return true;
         });
         if (!empty($login)) {
-            $this->write_all(self::message("- $login отсоединился"));
+            $this->write_all(self::message("- $login отсоединился"), $client_socket);
         }
     }
 
@@ -321,7 +323,7 @@ class ChatServer extends ChatProtocol {
             $result_login = $result["login"];
             $this->write($client_socket, self::login("OK"));
             $this->append_client_login($client_socket, $result_login);
-            $this->write_all(self::message("+ $login авторизовался"));
+            $this->write_all(self::message("+ $login авторизовался"), $client_socket);
             $this->write_log("+ $login авторизовался");
         } else {
             $this->write($client_socket, self::login("BAD"));
@@ -334,7 +336,7 @@ class ChatServer extends ChatProtocol {
     private function proccess_message_message($client_socket,
                                               string $client_login,
                                               string $text) {
-        $this->write_all(self::message("$client_login: $text"));
+        $this->write_all(self::message("$client_login: $text"), $client_socket);
         $this->write_log("$client_login: $text");
     }
 
